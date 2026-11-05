@@ -1,0 +1,33 @@
+#include <Wire.h>
+#include "SparkFun_SCD30_Arduino_Library.h"
+
+SCD30 airSensor;
+
+void setup() {
+  Serial.begin(115200);
+  Wire.begin();
+
+  if (!airSensor.begin()) {
+    Serial.println("Sensor nicht gefunden");
+    while(1);
+  }
+}
+
+void loop() {
+
+  if (airSensor.dataAvailable()) {
+
+    Serial.print("CO2: ");
+    Serial.println(airSensor.getCO2());
+
+    Serial.print("Temp: ");
+    Serial.println(airSensor.getTemperature());
+
+    Serial.print("Humidity: ");
+    Serial.println(airSensor.getHumidity());
+
+    Serial.println();
+  }
+
+  delay(2000);
+}

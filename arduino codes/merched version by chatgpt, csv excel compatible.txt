@@ -1,0 +1,152 @@
+#include <Wire.h>
+#include "SparkFun_SCD30_Arduino_Library.h"
+#include "MAX30105.h"
+#include "heartRate.h"
+#include "DFRobot_OxygenSensor.h"
+
+// ================== SENSOR OBJECTS ==================
+SCD30 airSensor;
+MAX30105 particleSensor;
+DFRobot_OxygenSensor oxygen;
+
+#define O2_I2C_ADDRESS 0x73
+#define MAX_BEATS 11
+
+// ================== HEART RATE ==================
+unsigned long beatTimes[MAX_BEATS];
+int beatIndex = 0;
+int beatsStored = 0;
+float bpm = 0;
+
+// ================== AIRFLOW ==================
+volatile unsigned long pulseCount = 0;
+unsigned long lastFlowTime = 0;
+float totalLiters = 0;
+float calibrationFactor = 430.0;
+float previousFreq = 0;
+
+// ================== TIMING ==================
+unsigned long lastPrintTime = 0;
+
+// ================== INTERRUPT ==================
+void countPulse() {
+  pulseCount++;
+}
+
+void setup() {
+
+  Serial.begin(115200);
+  Wire.begin();
+
+  // ---- SCD30 ----
+  if (!airSensor.begin()) {
+    Serial.println("SCD30 not found");
+    while (1);
+  }
+
+  // ---- MAX30102 ----
+  if (!particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
+    Serial.println("MAX30102 not found");
+    while (1);
+  }
+  particleSensor.setup();
+  particleSensor.setPulseAmplitudeRed(0x0A);
+  particleSensor.setPulseAmplitudeIR(0x1F);
+
+  // ---- Oxygen ----
+  while (!oxygen.begin(O2_I2C_ADDRESS)) {
+    Serial.println("Oxygen sensor not detected");
+    delay(1000);
+  }
+
+  // ---- Airflow ----
+  pinMode(2, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(2), countPulse, RISING);
+  lastFlowTime = millis();
+
+  // CSV Header
+  Serial.println("time_ms,co2,temp,humidity,o2,bpm,flow_freq,total_liters");
+}
+
+void loop() {
+
+  unsigned long now = millis();
+
+  // ================= HEART RATE =================
+  long irValue = particleSensor.getIR();
+
+  if (checkForBeat(irValue)) {
+    beatTimes[beatIndex] = now;
+    beatIndex = (beatIndex + 1) % MAX_BEATS;
+    if (beatsStored < MAX_BEATS) beatsStored++;
+
+    if (beatsStored >= 2) {
+      int intervals = beatsStored - 1;
+      unsigned long intervalSum = 0;
+
+      for (int i = 0; i < intervals; i++) {
+        int idx1 = (beatIndex - 1 - i + MAX_BEATS) % MAX_BEATS;
+        int idx2 = (beatIndex - 2 - i + MAX_BEATS) % MAX_BEATS;
+        intervalSum += (beatTimes[idx1] - beatTimes[idx2]);
+      }
+
+      float avgInterval = intervalSum / (float)intervals;
+      bpm = 60000.0 / avgInterval;
+    }
+  }
+
+  // ================= AIRFLOW =================
+  if (now - lastFlowTime >= 100) {
+
+    detachInterrupt(digitalPinToInterrupt(2));
+
+    unsigned long pulses = pulseCount;
+    pulseCount = 0;
+
+    float currentFreq = pulses * 10.0;
+
+    if (currentFreq > previousFreq) {
+      float litersStep = pulses / calibrationFactor;
+      totalLiters += litersStep;
+    }
+
+    previousFreq = currentFreq;
+    lastFlowTime = now;
+
+    attachInterrupt(digitalPinToInterrupt(2), countPulse, RISING);
+  }
+
+  // ================= PRINT DATA =================
+  if (now - lastPrintTime >= 1000) {
+
+    float co2 = 0;
+    float temp = 0;
+    float hum = 0;
+
+    if (airSensor.dataAvailable()) {
+      co2 = airSensor.getCO2();
+      temp = airSensor.getTemperature();
+      hum = airSensor.getHumidity();
+    }
+
+    float o2 = oxygen.getOxygenData(10);
+
+    Serial.print(now);
+    Serial.print(",");
+    Serial.print(co2);
+    Serial.print(",");
+    Serial.print(temp);
+    Serial.print(",");
+    Serial.print(hum);
+    Serial.print(",");
+    Serial.print(o2);
+    Serial.print(",");
+    Serial.print(bpm);
+    Serial.print(",");
+    Serial.print(previousFreq);
+    Serial.print(",");
+    Serial.println(totalLiters);
+
+    lastPrintTime = now;
+  }
+}

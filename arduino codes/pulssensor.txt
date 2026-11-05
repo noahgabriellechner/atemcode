@@ -1,0 +1,62 @@
+#include <Wire.h>
+#include "MAX30105.h"
+#include "heartRate.h"
+
+MAX30105 particleSensor;
+
+#define MAX_BEATS 11   // 10 intervals = 11 beats
+
+unsigned long beatTimes[MAX_BEATS];
+int beatIndex = 0;
+int beatsStored = 0;
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+
+  if (!particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
+    Serial.println("MAX30102 not found");
+    while (1);
+  }
+
+  particleSensor.setup();
+  particleSensor.setPulseAmplitudeRed(0x0A);
+  particleSensor.setPulseAmplitudeIR(0x1F);
+
+  Serial.println("Place finger on sensor");
+}
+
+void loop() {
+  long irValue = particleSensor.getIR();
+  unsigned long now = millis();
+
+  if (checkForBeat(irValue)) {
+
+    // store beat timestamp (circular buffer)
+    beatTimes[beatIndex] = now;
+    beatIndex = (beatIndex + 1) % MAX_BEATS;
+    if (beatsStored < MAX_BEATS) beatsStored++;
+
+    // need at least 2 beats to calculate BPM
+    if (beatsStored >= 2) {
+      int intervals = beatsStored - 1;
+      unsigned long intervalSum = 0;
+
+      for (int i = 0; i < intervals; i++) {
+        int idx1 = (beatIndex - 1 - i + MAX_BEATS) % MAX_BEATS;
+        int idx2 = (beatIndex - 2 - i + MAX_BEATS) % MAX_BEATS;
+        intervalSum += (beatTimes[idx1] - beatTimes[idx2]);
+      }
+
+      float avgIntervalMs = intervalSum / (float)intervals;
+      float bpm = 60000.0 / avgIntervalMs;
+
+      Serial.print("Intervals used: ");
+      Serial.print(intervals);
+      Serial.print(" | BPM: ");
+      Serial.println(bpm, 1);
+    }
+  }
+
+  delay(5);
+}

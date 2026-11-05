@@ -1,0 +1,48 @@
+volatile unsigned long pulseCount = 0;
+unsigned long totalPulses = 0; //calibration
+
+unsigned long lastTime = 0;
+float totalLiters = 0;
+
+float calibrationFactor = 369.0;  //variabel
+
+void countPulse() {
+  pulseCount++;
+}
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(2, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(2), countPulse, RISING);
+  lastTime = millis();
+}
+
+void loop() {
+
+  if (millis() - lastTime >= 1000) {
+
+    detachInterrupt(digitalPinToInterrupt(2));
+
+    unsigned long pulses = pulseCount;
+    pulseCount = 0;
+
+    totalPulses += pulses; //c
+    Serial.print("Total Pulses: "); //c
+    Serial.println(totalPulses); //c
+
+    // Flow rate (Liters per minute)
+    float litersPerSecond = pulses / calibrationFactor;
+    float litersPerMinute = litersPerSecond * 60.0;
+
+    totalLiters += litersPerSecond;
+
+    Serial.print("Flow (L/min): ");
+    Serial.print(litersPerMinute);
+    Serial.print("   Total Volume (L): ");
+    Serial.println(totalLiters);
+
+    lastTime = millis();
+
+    attachInterrupt(digitalPinToInterrupt(2), countPulse, RISING);
+  }
+}

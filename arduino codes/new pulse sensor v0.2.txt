@@ -1,0 +1,64 @@
+#include "HeartSpeed.h"
+
+HeartSpeed heartspeed(A1);
+
+const int NUM_VALUES = 7;
+int bpmValues[NUM_VALUES];
+int valueCount = 0;
+
+void sortArray(int arr[], int n) {
+  for (int i = 0; i < n - 1; i++) {
+    for (int j = i + 1; j < n; j++) {
+      if (arr[j] < arr[i]) {
+        int temp = arr[i];
+        arr[i] = arr[j];
+        arr[j] = temp;
+      }
+    }
+  }
+}
+
+void mycb(uint8_t rawData, int value) {
+
+  // rawData = 0 means this is a calculated BPM value
+  if (!rawData) {
+
+    // Ignore clearly unreasonable values
+    if (value < 40 || value > 200) {
+      return;
+    }
+
+    bpmValues[valueCount % NUM_VALUES] = value;
+    valueCount++;
+
+    // We need at least 7 values before calculating the median
+    if (valueCount >= NUM_VALUES) {
+
+      int temp[NUM_VALUES];
+
+      for (int i = 0; i < NUM_VALUES; i++) {
+        temp[i] = bpmValues[i];
+      }
+
+      sortArray(temp, NUM_VALUES);
+
+      int median = temp[NUM_VALUES / 2];
+
+      Serial.print("Raw BPM: ");
+      Serial.print(value);
+
+      Serial.print("   |   Filtered BPM: ");
+      Serial.println(median);
+    }
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  heartspeed.setCB(mycb);
+  heartspeed.begin();
+}
+
+void loop() {
+}

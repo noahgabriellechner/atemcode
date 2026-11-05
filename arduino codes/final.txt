@@ -1,0 +1,136 @@
+#include <Wire.h>
+#include "SparkFun_SCD30_Arduino_Library.h"
+#include "MAX30105.h"
+#include "heartRate.h"
+#include "DFRobot_OxygenSensor.h"
+
+// ================== SENSOR OBJECTS ==================
+SCD30 airSensor;
+MAX30105 particleSensor;
+DFRobot_OxygenSensor oxygen;
+
+#define O2_I2C_ADDRESS 0x73
+#define MAX_BEATS 11
+#define FLOW_BUFFER 3   // 3 × 5 seconds = 15 second rolling window
+
+// ================== HEART RATE ==================
+unsigned long beatTimes[MAX_BEATS];
+int beatIndex = 0;
+int beatsStored = 0;
+float bpm = 0;
+
+// ================== AIRFLOW ==================
+volatile unsigned long pulseCount = 0;
+float calibrationFactor = 504.4;
+
+float flowBuffer[FLOW_BUFFER];
+int flowIndex = 0;
+int flowStored = 0;
+
+float litersPerMinute = 0;   // <-- this is now the SMOOTHED value
+
+// ================== TIMING ==================
+unsigned long lastPrintTime = 0;
+
+// ================== INTERRUPT ==================
+void countPulse() {
+  pulseCount++;
+}
+
+void setup() {
+
+  Serial.begin(115200);
+  Wire.begin();
+
+  if (!airSensor.begin()) while (1);
+  if (!particleSensor.begin(Wire, I2C_SPEED_STANDARD)) while (1);
+
+  particleSensor.setup();
+  particleSensor.setPulseAmplitudeRed(0x0A);
+  particleSensor.setPulseAmplitudeIR(0x1F);
+
+  while (!oxygen.begin(O2_I2C_ADDRESS)) delay(1000);
+
+  pinMode(2, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(2), countPulse, RISING);
+
+  Serial.println("time_s,O2_percent,CO2_percent,BPM,Airflow_L_per_min_15sAvg");
+}
+
+void loop() {
+
+  unsigned long now = millis();
+
+  // ================= HEART RATE =================
+  long irValue = particleSensor.getIR();
+
+  if (checkForBeat(irValue)) {
+    beatTimes[beatIndex] = now;
+    beatIndex = (beatIndex + 1) % MAX_BEATS;
+    if (beatsStored < MAX_BEATS) beatsStored++;
+
+    if (beatsStored >= 2) {
+      int intervals = beatsStored - 1;
+      unsigned long intervalSum = 0;
+
+      for (int i = 0; i < intervals; i++) {
+        int idx1 = (beatIndex - 1 - i + MAX_BEATS) % MAX_BEATS;
+        int idx2 = (beatIndex - 2 - i + MAX_BEATS) % MAX_BEATS;
+        intervalSum += (beatTimes[idx1] - beatTimes[idx2]);
+      }
+
+      float avgInterval = intervalSum / (float)intervals;
+      bpm = 60000.0 / avgInterval;
+    }
+  }
+
+  // ================= PRINT EVERY 5 SECONDS =================
+  if (now - lastPrintTime >= 5000) {
+
+    // ---- CO2 ----
+    float co2_percent = 0;
+    if (airSensor.dataAvailable()) {
+      float co2ppm = airSensor.getCO2();
+      co2_percent = co2ppm / 10000.0;
+    }
+
+    // ---- O2 ----
+    float o2 = oxygen.getOxygenData(10);
+
+    // ---- AIRFLOW RAW 5s BLOCK ----
+    noInterrupts();
+    unsigned long pulses = pulseCount;
+    pulseCount = 0;
+    interrupts();
+
+    float litersIn5s = pulses / calibrationFactor;
+    float litersPerMinute_raw = litersIn5s * 12.0;
+
+    // ---- STORE IN ROLLING BUFFER ----
+    flowBuffer[flowIndex] = litersPerMinute_raw;
+    flowIndex = (flowIndex + 1) % FLOW_BUFFER;
+
+    if (flowStored < FLOW_BUFFER) flowStored++;
+
+    // ---- CALCULATE 15s ROLLING AVERAGE ----
+    float sum = 0;
+    for (int i = 0; i < flowStored; i++) {
+      sum += flowBuffer[i];
+    }
+
+    litersPerMinute = sum / flowStored;  // <-- final smoothed value
+
+    // ---- PRINT ----
+    Serial.print(now / 1000.0);
+    Serial.print(",");
+    Serial.print(o2);
+    Serial.print(",");
+    Serial.print(co2_percent);
+    Serial.print(",");
+    Serial.print(bpm);
+    Serial.print(",");
+    Serial.println(litersPerMinute);
+
+    lastPrintTime = now;
+  }
+}

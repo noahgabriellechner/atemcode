@@ -1,0 +1,53 @@
+volatile unsigned long pulseCount = 0;
+
+unsigned long lastTime = 0;
+
+float totalLiters = 0;
+float calibrationFactor = 430.0;  // change to your value
+
+float previousFreq = 0;
+
+void countPulse() {
+  pulseCount++;
+}
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(2, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(2), countPulse, RISING);
+  lastTime = millis();
+}
+
+void loop() {
+
+  if (millis() - lastTime >= 100) {  // 100 ms window
+
+    detachInterrupt(digitalPinToInterrupt(2));
+
+    unsigned long pulses = pulseCount;
+    pulseCount = 0;
+
+    float currentFreq = pulses * 10.0;  // convert to pulses/sec
+
+    // Only count if frequency is increasing
+    if (currentFreq > previousFreq) {
+
+      float litersThisStep = pulses / calibrationFactor;
+      totalLiters += litersThisStep;
+
+      Serial.print("Counting | ");
+    } else {
+      Serial.print("Ignoring | ");
+    }
+
+    Serial.print("Freq: ");
+    Serial.print(currentFreq);
+    Serial.print(" | Total L: ");
+    Serial.println(totalLiters);
+
+    previousFreq = currentFreq;
+
+    lastTime = millis();
+    attachInterrupt(digitalPinToInterrupt(2), countPulse, RISING);
+  }
+}
