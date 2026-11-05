@@ -4,7 +4,7 @@ unsigned long totalPulses = 0; //calibration
 unsigned long lastTime = 0;
 float totalLiters = 0;
 
-float calibrationFactor = 369.0;  //variabel
+float calibrationFactor = 504.4;  //variabel
 
 void countPulse() {
   pulseCount++;
